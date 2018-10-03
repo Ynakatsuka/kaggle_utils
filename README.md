@@ -1,2 +1,3 @@
 # kaggle_utils
-this is work in progress repositry.
+this is work in progress repository.
+
