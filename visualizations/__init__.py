@@ -54,14 +54,28 @@ def plot_feature_importances(model, predictors, max_num=50, importance_type='gai
     importances['importances'] = importances['importances'].astype(np.float32)
     importances = importances.sort_values('importances', ascending=False).iloc[:max_num]
     # plot
-    plt.clf()
-    plt.figure(figsize=(16, 6))
-    sns.barplot(x='importances', y='feature', data=importances, orient='h')
-    plt.title(importance_type)
-    plt.tight_layout()
     if path is not None:
+        plt.clf()
+        plt.figure(figsize=(16, 6))
+        sns.barplot(x='importances', y='feature', data=importances, orient='h')
+        plt.title(importance_type)
+        plt.tight_layout()
         plt.savefig(path)
         
+
+def plot_mean_feature_importances(feature_importances, max_num=50, importance_type='gain', path=None):
+    mean_gain = feature_importances[[importance_type, 'feature']].groupby('feature').mean()
+    feature_importances['mean_'+importance_type] = feature_importances['feature'].map(mean_gain[importance_type])
+
+    if path is not None:
+        data = feature_importances.sort_values('mean_'+importance_type, ascending=False).iloc[:max_num]
+        plt.clf()
+        plt.figure(figsize=(16, 6))
+        sns.barplot(x=importance_type, y='feature', data=data)
+        plt.tight_layout()
+        plt.savefig(path)
+    
+    return feature_importances
 
 def plot_prediction_histgram():
     pass
