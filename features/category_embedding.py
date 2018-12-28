@@ -1,3 +1,4 @@
+import itertools
 import gc
 import numpy as np
 import pandas as pd
@@ -8,23 +9,26 @@ from .base import BaseFeatureTransformer
 
 
 class CategoryVectorizer(BaseFeatureTransformer):
-    def __init__(self, col1, col2, n_components, 
+    def __init__(self, categorical_columns, n_components, 
                  vectorizer=CountVectorizer(), 
                  transformer=LatentDirichletAllocation(),
                  name='CountLDA'):
-        self.col1 = col1
-        self.col2 = col2
+        self.categorical_columns = categorical_columns
         self.n_components = n_components
         self.vectorizer = vectorizer
         self.transformer = transformer
         self.name = name + str(self.n_components)
 
     def transform(self, dataframe):
-        sentence = self.create_word_list(dataframe, self.col1, self.col2)
-        sentence = self.vectorizer.fit_transform(sentence)
-        features = self.transformer.fit_transform(sentence)
-        features = self.get_feature(dataframe, self.col1, self.col2, features, name=self.name)
-        return pd.concat([dataframe, features], axis=1)
+        features = []
+        for (col1, col2) in self.get_column_pairs():
+            sentence = self.create_word_list(dataframe, col1, col2)
+            sentence = self.vectorizer.fit_transform(sentence)
+            feature = self.transformer.fit_transform(sentence)
+            feature = self.get_feature(dataframe, col1, col2, feature, name=self.name)
+            features.append(feature)
+        features = pd.concat(features, axis=1)
+        return features
 
     def create_word_list(self, dataframe, col1, col2):
         col1_size = int(dataframe[col1].values.max() + 1)
@@ -32,7 +36,7 @@ class CategoryVectorizer(BaseFeatureTransformer):
         for val1, val2 in zip(dataframe[col1].values, dataframe[col2].values):
             col2_list[int(val1)].append(int(val2))
         return [' '.join(map(str, ls)) for ls in col2_list]
-
+    
     def get_feature(self, dataframe, col1, col2, latent_vector, name=''):
         features = np.zeros(
             shape=(len(dataframe), self.n_components), dtype=np.float32)
@@ -42,6 +46,9 @@ class CategoryVectorizer(BaseFeatureTransformer):
             features[i, :self.n_components] = latent_vector[val1]
 
         return pd.DataFrame(data=features, columns=self.columns)
+    
+    def get_column_pairs(self):
+        return [(col1, col2) for col1, col2 in itertools.product(self.categorical_columns, repeat=2) if col1 != col2]
 
     def get_numerical_features(self):
         return self.columns

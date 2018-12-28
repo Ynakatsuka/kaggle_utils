@@ -1,8 +1,17 @@
 import numpy as np
+import pandas as pd
 from scipy.special import erfinv
 from scipy.stats import boxcox
 from sklearn.base import BaseEstimator, TransformerMixin
 # from .preprocess import 
+
+
+def to_category(dataframe, cat=None):
+    if cat is None:
+        cat = [col for col in dataframe.columns if dataframe[col].dtype == 'object']
+    for c in cat:
+        dataframe[c], uniques = pd.factorize(dataframe[c])
+    return dataframe
 
 
 class GaussRankScaler(BaseEstimator, TransformerMixin):
