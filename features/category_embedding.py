@@ -34,7 +34,7 @@ class CategoryVectorizer(BaseFeatureTransformer):
         col1_size = int(dataframe[col1].values.max() + 1)
         col2_list = [[] for _ in range(col1_size)]
         for val1, val2 in zip(dataframe[col1].values, dataframe[col2].values):
-            col2_list[int(val1)].append(int(val2))
+            col2_list[int(val1)].append(col2+str(val2))
         return [' '.join(map(str, ls)) for ls in col2_list]
     
     def get_feature(self, dataframe, col1, col2, latent_vector, name=''):
@@ -53,6 +53,57 @@ class CategoryVectorizer(BaseFeatureTransformer):
     def get_numerical_features(self):
         return self.columns
 
+    
+class Category2Vec(BaseFeatureTransformer):
+    '''
+        sequence of bag of category to vector
+    '''
+    def __init__(self, categorical_columns, user_id_feature,
+                 n_components, 
+                 vectorizer=CountVectorizer(), 
+                 transformer=LatentDirichletAllocation(),
+                 name='CountLDA'):
+        self.categorical_columns = categorical_columns
+        self.user_id_feature = user_id_feature
+        self.n_components = n_components
+        self.vectorizer = vectorizer
+        self.transformer = transformer
+        self.name = name + str(self.n_components)
+
+    def transform(self, dataframe):
+        # preprocess
+        df = dataframe[[self.user_id_feature] + self.categorical_columns].copy()
+        df[self.categorical_columns].fillna(-1, inplace=True)
+        df['user_document'] = ''
+        for c in self.categorical_columns:
+            df['user_document'] += c + df[c].astype(str) + ' '
+        df = df[[self.user_id_feature, 'user_document']]
+        gc.collect()
+        
+        # vectorize
+        documents, user_ids = self.create_documents(df)
+        documents = self.vectorizer.fit_transform(documents)
+        feature = self.transformer.fit_transform(documents)
+        feature = self.get_feature(df, feature, name=self.name)
+        feature[self.user_id_feature] = user_ids
+        return feature
+   
+    def get_feature(self, dataframe, latent_vector, name=''):
+        features = np.zeros(
+            shape=(len(latent_vector), self.n_components), dtype=np.float32)
+        self.columns = ['_'.join([name, 'user2vec', str(i)])
+                   for i in range(self.n_components)]
+        return pd.DataFrame(data=features, columns=self.columns)
+    
+    def create_documents(self, dataframe):
+        g = dataframe.groupby(self.user_id_feature)
+        documents = g['user_document'].apply(lambda x: ''.join(x))
+        user_ids = g['user_document'].max().index
+        return documents, user_ids
+
+    def get_numerical_features(self):
+        return self.columns
+    
 
 class User2Vec(BaseFeatureTransformer):
     def __init__(self, target_feature, user_id_feature, sort_features=None,

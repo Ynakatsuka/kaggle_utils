@@ -77,5 +77,11 @@ def plot_mean_feature_importances(feature_importances, max_num=50, importance_ty
     
     return feature_importances
 
-def plot_prediction_histgram():
-    pass
+def plot_prediction_histogram(y, bins=100, path=None):
+    # plot
+    if path is not None:
+        plt.clf()
+        plt.figure(figsize=(12, 6))
+        plt.hist(y, bins=bins)
+        plt.title('Histogram')
+        plt.savefig(path)

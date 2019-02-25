@@ -102,7 +102,6 @@ class DiffGroupbyTransformer(BaseGroupByTransformer):
                     dataframe[new_feature] = dataframe[base_feature] - dataframe[v]
         return dataframe
 
-    
     def _get_feature_names(self, key, var, agg):
         _agg = []
         for a in agg:
@@ -112,6 +111,33 @@ class DiffGroupbyTransformer(BaseGroupByTransformer):
                 _agg.append(a)
         return ['_'.join(['diff', a, v, 'groupby'] + key) for v in var for a in _agg]
 
+
+class RatioGroupbyTransformer(BaseGroupByTransformer):
+    def _aggregate(self):
+        raise NotImplementedError
+        
+    def _merge(self):
+        raise NotImplementedError
+    
+    def transform(self, dataframe):
+        for param_dict in self.param_dict:
+            key, var, agg, on = self._get_params(param_dict)
+            for a in agg:
+                for v in var:
+                    new_feature = '_'.join(['ratio', a, v, 'groupby'] + key)
+                    base_feature = '_'.join([a, v, 'groupby'] + key)
+                    dataframe[new_feature] = dataframe[v] / dataframe[base_feature]
+        return dataframe
+
+    def _get_feature_names(self, key, var, agg):
+        _agg = []
+        for a in agg:
+            if not isinstance(a, str):
+                _agg.append(a.__name__)
+            else:
+                _agg.append(a)
+        return ['_'.join(['ratio', a, v, 'groupby'] + key) for v in var for a in _agg]
+    
     
 class LagGroupbyTransformer(BaseGroupByTransformer):
     '''
@@ -142,12 +168,12 @@ class LagGroupbyTransformer(BaseGroupByTransformer):
             new_features = self._get_feature_names(key, var, agg)
             features = dataframe[all_features].groupby(key)[var].shift(-self.shift) - dataframe[var]
             features.columns = new_features
-            features = features.fillna(self.fill_na)
             for c in new_features:
                 if features[c].dtype in ['float16', 'float32', 'float64']:
                     features[c] = features[c].astype('float32')
                 else:
                     features[c] = features[c].dt.seconds.astype('float32')
+            features = features.fillna(self.fill_na)
             self.features.append(features)
         if self.sort_features is not None:
             dataframe = dataframe.sort_index()
@@ -194,7 +220,6 @@ class EWMGroupbyTransformer(BaseGroupByTransformer):
             features = dataframe[all_features].groupby(key)[var].transform(self.calc_shifted_ewm)
             features = features.fillna(self.fill_na)
             features.columns = new_features
-            features = change_dtype(features, columns=new_features)
             self.features.append(features)
         if self.sort_features is not None:
             dataframe = dataframe.sort_index()
@@ -265,53 +290,61 @@ class TargetEncodingTransformer(BaseGroupByTransformer):
     '''
 
     def __init__(self, target, n_splits, cvfold, len_train, param_dict=None):
+        '''
+            Params
+            ------
+            target : list
+        '''
         super().__init__(param_dict)
+        if not isinstance(target, list):
+            self.var = [target]
+        else:
+            self.var = target
+        self.agg = ['encoding']
         self.n_splits = n_splits
         self.cvfold = cvfold
         self.len_train = len_train
-        self.var = [target]
-        self.agg = ['encoding']
+        
+    def _encode(self, dataframe, merge_dataframe, key, var, new_features, avg):
+        g = dataframe[key + var].groupby(key)[var].agg('mean').reset_index()
+        g.columns = key + new_features
+        g = change_dtype(g, columns=new_features)
+        g[new_features] = g[new_features].fillna(avg)
+        merge_dataframe = merge_dataframe.merge(g, on=key, how='left')
+        return merge_dataframe
 
     def _aggregate(self, dataframe):
+        train = dataframe[:self.len_train]
+        test = dataframe[self.len_train:]
+        
         self.features = []
         for param_dict in self.param_dict:
             key, var, agg, on = self._get_params(param_dict)
             all_features = list(set(key + var))
-            new_features = self._get_feature_names(key)
-            features = dataframe[all_features].groupby(key)[
-                var].agg('mean').reset_index()
-            features.columns = key + new_features
-            features = change_dtype(features, columns=new_features)
-            self.features.append(features)
+            new_features = self._get_feature_names(key, var, agg)
+            feature = pd.DataFrame(np.empty([len(dataframe), len(self.var)]), columns=new_features)
+
+            # for valid data
+            for fold_id in range(self.n_splits):
+                train_index = np.array(self.cvfold != fold_id).flatten()
+                valid_index = np.array(self.cvfold == fold_id).flatten()
+                trn = train.loc[train_index, key + var]
+                val = train.loc[valid_index, key]
+                local_avg = trn[self.var].mean()
+                val = self._encode(trn, val, key, var, new_features, local_avg)
+                feature.iloc[:self.len_train, :].loc[valid_index] = val[new_features]
+
+            # for test data
+            global_avg = train[var].mean()
+            test = self._encode(train, test, key, var, new_features, global_avg)
+            feature.iloc[self.len_train:, :] = test[new_features]
+            self.features.append(feature)    
         return self
-
-    def transform(self, dataframe):
-        train = dataframe[:self.len_train]
-        test = dataframe[self.len_train:]
-        new_features = self.get_feature_names()
-        result = pd.DataFrame(
-            np.empty([len(dataframe), len(self.param_dict)]), columns=new_features)
         
-        # for valid data
-        for fold_id in range(self.n_splits):
-            train_index = np.array(cvfold != fold_id)
-            valid_index = np.array(cvfold == fold_id)
-            trn = train.loc[train_index, key + [self.var]]
-            val = train.loc[valid_index, key]
-
-            local_avg = trn[self.var].mean()
-            self._aggregate(trn)
-            val = self._merge(val, merge=True)
-            result.iloc[:len_train].loc[valid_index] = val[new_features].fillna(local_avg)
-
-        # for test data
-        global_avg = train[self.var].mean()
-        self._aggregate(train)
-        test = self._merge(test, merge=True)
-        result.iloc[len_train:] = test[new_features].fillna(global_avg)
-
-        return pd.concat([dataframe, result], axis=1)
-
+    def transform(self, dataframe):
+        self._aggregate(dataframe)
+        return self._merge(dataframe, merge=False)
+    
 
 class BayesianTargetEncodingTransformer(TargetEncodingTransformer):
     '''
@@ -330,20 +363,13 @@ class BayesianTargetEncodingTransformer(TargetEncodingTransformer):
         # overwrite
         self.agg = ['bayesian_encoding']
 
-    def _aggregate(self, dataframe):
-        self.features = []
-        local_avg = dataframe[self.var].mean()
-        for param_dict in self.param_dict:
-            key, var, agg, on = self._get_params(param_dict)
-            all_features = list(set(key + self.var))
-            new_features = self._get_feature_names(key)
-            features = dataframe[all_features].groupby(key)[self.var].agg(
-                ['sum', 'count']).reset_index()
-            features.columns = key + ['sum', 'count']
-            features[new_features] = (features['sum'] + self.l * local_avg) / (features['count'] + self.l)
-            features = change_dtype(features, columns=new_features)
-            self.features.append(features)
-        return self
-
+    def _encode(self, dataframe, merge_dataframe, key, var, new_features, avg):
+        g = dataframe[key + var].groupby(key)[self.var].agg(['sum', 'count']).reset_index()
+        g.columns = key + ['sum', 'count']
+        g[new_features[0]] = ((g['sum'] + (self.l * avg).values) / (g['count'] + self.l)).fillna(avg)
+        g = change_dtype(g, columns=new_features)
+        merge_dataframe = merge_dataframe.merge(g[key + new_features], on=key, how='left')
+        return merge_dataframe
+            
     def _get_feature_names(self, key, var, agg):
         return ['_'.join([a, str(self.l), v, 'groupby'] + key) for v in var for a in agg]
