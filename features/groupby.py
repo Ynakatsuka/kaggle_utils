@@ -97,8 +97,12 @@ class DiffGroupbyTransformer(BaseGroupByTransformer):
             key, var, agg, on = self._get_params(param_dict)
             for a in agg:
                 for v in var:
-                    new_feature = '_'.join(['diff', a, v, 'groupby'] + key)
-                    base_feature = '_'.join([a, v, 'groupby'] + key)
+                    if not isinstance(a, str):
+                        new_feature = '_'.join(['diff', a.__name__, v, 'groupby'] + key)
+                        base_feature = '_'.join([a.__name__, v, 'groupby'] + key)
+                    else:
+                        new_feature = '_'.join(['diff', a, v, 'groupby'] + key)
+                        base_feature = '_'.join([a, v, 'groupby'] + key)
                     dataframe[new_feature] = dataframe[base_feature] - dataframe[v]
         return dataframe
 
@@ -124,8 +128,12 @@ class RatioGroupbyTransformer(BaseGroupByTransformer):
             key, var, agg, on = self._get_params(param_dict)
             for a in agg:
                 for v in var:
-                    new_feature = '_'.join(['ratio', a, v, 'groupby'] + key)
-                    base_feature = '_'.join([a, v, 'groupby'] + key)
+                    if not isinstance(a, str):
+                        new_feature = '_'.join(['diff', a.__name__, v, 'groupby'] + key)
+                        base_feature = '_'.join([a.__name__, v, 'groupby'] + key)
+                    else:
+                        new_feature = '_'.join(['diff', a, v, 'groupby'] + key)
+                        base_feature = '_'.join([a, v, 'groupby'] + key)
                     dataframe[new_feature] = dataframe[v] / dataframe[base_feature]
         return dataframe
 
@@ -185,6 +193,122 @@ class LagGroupbyTransformer(BaseGroupByTransformer):
 
     def _get_feature_names(self, key, var, agg):
         return ['_'.join([a, str(self.shift), v, 'groupby'] + key) for v in var for a in agg]
+
+
+class CategoryLagGroupbyTransformer(LagGroupbyTransformer):
+    '''
+        Example
+        -------
+        param_dict = [
+            {
+                'key': ['ip','hour'], 
+                'var': ['device'], 
+            }
+        ]
+    '''
+
+    def __init__(self, param_dict=None, shift=1, fill_na=-1, sort_features=None):
+        super().__init__(param_dict)
+        self.shift = shift
+        self.fill_na = fill_na
+        self.sort_features = sort_features
+        self.agg = ['catlag']
+
+    def _aggregate(self, dataframe):
+        self.features = []
+        if self.sort_features is not None:
+            dataframe = dataframe.sort_values(self.sort_features)
+        for param_dict in self.param_dict:
+            key, var, agg, on = self._get_params(param_dict)
+            all_features = list(set(key + var))
+            new_features = self._get_feature_names(key, var, agg)
+            features = (dataframe[all_features].groupby(key)[var].shift(-self.shift) - dataframe[var])
+            features.columns = new_features
+            for c in new_features:
+                nan_index = features[c].isnull()
+                features[c] = features[c].fillna(0).astype(bool).astype(np.float32)
+                features[c][nan_index] = np.nan
+            features = features.fillna(self.fill_na)
+            self.features.append(features)
+        if self.sort_features is not None:
+            dataframe = dataframe.sort_index()
+        return self
+
+    
+class CategoryShareGroupbyTransformer(LagGroupbyTransformer):
+    '''
+        Example
+        -------
+        param_dict = [
+            {
+                'key': ['day'], 
+                'var': ['device'], 
+            }
+        ]
+    '''
+
+    def __init__(self, param_dict=None, shift=1, fill_na=-1, sort_features=None):
+        super().__init__(param_dict)
+        self.shift = shift
+        self.fill_na = fill_na
+        self.sort_features = sort_features
+        self.agg = ['category_share']
+
+    def _aggregate(self, dataframe):
+        self.features = []
+        if self.sort_features is not None:
+            dataframe = dataframe.sort_values(self.sort_features)
+        for param_dict in self.param_dict:
+            key, var, agg, on = self._get_params(param_dict)
+            all_features = list(set(key + var))
+            new_features = self._get_feature_names(key, var, agg)
+            
+            frac = dataframe[all_features].groupby(key+var).size().reset_index()
+            frac.columns = key + var + ['frac']
+            
+            denom = dataframe[all_features].groupby(key).size().reset_index()
+            denom.columns = key + ['denom']
+            
+            features = frac.merge(denom, on=key, how='inner')
+            features[new_features[0]] = features['frac'] / features['denom']
+            features = features[key + new_features]
+            
+            features = change_dtype(features, columns=new_features)
+            self.features.append(features)
+        if self.sort_features is not None:
+            dataframe = dataframe.sort_index()
+        return self
+    
+
+class PrevCategoryShareGroupbyTransformer(CategoryShareGroupbyTransformer):
+    '''
+        Example
+        -------
+        param_dict = [
+            {
+                'key': ['day'], 
+                'var': ['device'], 
+                'on': ['prev_day'],
+            }
+        ]
+    '''
+
+    def __init__(self, param_dict=None, shift=1, fill_na=-1, sort_features=None):
+        super().__init__(param_dict)
+        self.shift = shift
+        self.fill_na = fill_na
+        self.sort_features = sort_features
+        self.agg = ['category_share_diff']
+
+    def _merge(self, dataframe, merge=True):
+        for param_dict, features in zip(self.param_dict, self.features):
+            key, var, agg, on = self._get_params(param_dict)
+            if merge:
+                dataframe = dataframe.merge(features, how='left', left_on=on, right_on=key)
+            else:
+                new_features = self._get_feature_names(key, var, agg)
+                dataframe = pd.concat([dataframe, features[new_features]], axis=1)
+        return dataframe
 
 
 class EWMGroupbyTransformer(BaseGroupByTransformer):

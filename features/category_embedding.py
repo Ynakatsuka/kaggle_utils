@@ -3,7 +3,7 @@ import gc
 import numpy as np
 import pandas as pd
 from gensim.models.doc2vec import Doc2Vec, TaggedDocument
-from sklearn.decomposition import LatentDirichletAllocation
+from sklearn.decomposition import LatentDirichletAllocation, NMF
 from sklearn.feature_extraction.text import CountVectorizer
 from .base import BaseFeatureTransformer
 
@@ -29,7 +29,7 @@ class CategoryVectorizer(BaseFeatureTransformer):
                 feature = self.get_feature(dataframe, col1, col2, feature, name=self.name)
                 features.append(feature)
             except:
-                pass
+                print(f'passing {col1} and {col2}')
         features = pd.concat(features, axis=1)
         return features
 
@@ -56,7 +56,46 @@ class CategoryVectorizer(BaseFeatureTransformer):
     def get_numerical_features(self):
         return self.columns
 
+
+class CategoryNMFVectorizer(CategoryVectorizer):
+    def __init__(self, categorical_columns, n_components, 
+                 vectorizer=CountVectorizer(), 
+                 transformer=LatentDirichletAllocation(),
+                 name='CountNMF'):
+        self.categorical_columns = categorical_columns
+        self.n_components = n_components
+        self.vectorizer = vectorizer
+        self.transformer = transformer
+        self.name = name + str(self.n_components)
+
+    def transform(self, dataframe):
+        features = []
+        for (col1, col2) in self.get_column_pairs():
+            try:
+                sentence = self.create_word_list(dataframe, col1, col2)
+                sentence = self.vectorizer.fit_transform(sentence)
+                feature1 = self.transformer.fit_transform(sentence)
+                feature2 = self.transformer.components_
+                feature = self.get_feature(dataframe, col1, col2, feature1, feature2, name=self.name)
+                features.append(feature)
+            except:
+                print(f'passing {col1} and {col2}')
+        features = pd.concat(features, axis=1)
+        return features
     
+    def get_feature(self, dataframe, col1, col2, latent_vector1, latent_vector2, name=''):
+        features = np.zeros(
+            shape=(len(dataframe), self.n_components*2), dtype=np.float32)
+        self.columns = ['_'.join([name, col1, col2, str(i)])
+                   for i in range(self.n_components*2)]
+        for i, val1 in enumerate(dataframe[col1]):
+            features[i, :self.n_components] = latent_vector1[val1]
+        for i, val2 in enumerate(dataframe[col2]):
+            features[i, -self.n_components:] = latent_vector2[:, val2]
+
+        return pd.DataFrame(data=features, columns=self.columns)
+
+
 class Category2Vec(BaseFeatureTransformer):
     '''
         sequence of bag of category to vector
