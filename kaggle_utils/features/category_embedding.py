@@ -1,8 +1,8 @@
 import itertools
 import gc
+from keras.preprocessing.text import text_to_word_sequence
 import numpy as np
 import pandas as pd
-from gensim.models.doc2vec import Doc2Vec, TaggedDocument
 from gensim.models import Word2Vec
 from sklearn.decomposition import LatentDirichletAllocation, NMF
 from sklearn.feature_extraction.text import CountVectorizer
@@ -104,7 +104,7 @@ class CategoryNMFVectorizer(CategoryVectorizer):
         return pd.DataFrame(data=features, columns=self.columns)
 
 
-class Category2Vec(BaseFeatureTransformer):
+class CategoryUser2Vec(BaseFeatureTransformer):
     '''
         Encodes sequence of bag of category (including target) per a "user".
     '''
@@ -145,7 +145,7 @@ class Category2Vec(BaseFeatureTransformer):
         return df[self.columns]
    
     def get_feature(self, dataframe, latent_vector, name=''):
-        self.columns = ['_'.join([name, 'category2vec', str(i)])
+        self.columns = ['_'.join([name, 'category_user2vec', str(i)])
                    for i in range(self.n_components)]
         return pd.DataFrame(latent_vector, columns=self.columns)
     
@@ -159,7 +159,7 @@ class Category2Vec(BaseFeatureTransformer):
         return self.columns
 
 
-class Category2VecWithW2V(Category2Vec):
+class CategoryUser2VecWithW2V(CategoryUser2Vec):
     '''
         Encodes sequence of bag of category (including target) per a "user".
     '''
@@ -198,7 +198,7 @@ class Category2VecWithW2V(Category2Vec):
         vocab_vectors = pd.DataFrame(w2v_array.T, columns=vocab_keys)
         
         # vocab_keys -> aggregate by key
-        self.columns = ['_'.join([self.name, 'category2vec', g, str(i)]) for g in ['mean', 'median', 'min', 'max'] for i in range(self.n_components)]
+        self.columns = ['_'.join([self.name, 'category_user2vec', g, str(i)]) for g in ['mean', 'median', 'min', 'max'] for i in range(self.n_components)]
         features = self.aggregate_documents(documents, vocab_vectors)
 
         # merge
@@ -226,46 +226,66 @@ class Category2VecWithW2V(Category2Vec):
 
     def get_numerical_features(self):
         return self.columns
-    
 
-class User2Vec(BaseFeatureTransformer):
-    def __init__(self, target_feature, user_id_feature, sort_features=None,
-                 n_components=300, window=8, min_count=5, workers=4, seed=777, 
-                 save_doc2vec_model_path=None, name='user2vec'):
-        self.target_feature = target_feature
-        self.user_id_feature = user_id_feature
-        self.sort_features = sort_features
+
+class Category2VecWithW2V(BaseFeatureTransformer):
+    '''
+        Encodes combination of categories to sequence.
+        This is similar to CategoryVectorizer, but Category2VecWithW2V can consider combinations of many categories.
+    '''
+    def __init__(self, categorical_columns, 
+                 n_components=10, min_count=1, workers=4, seed=777, 
+                 save_model_path=None, name='category2vec'):
+        self.categorical_columns = categorical_columns
         self.n_components = n_components
-        self.window = window
+        self.window = len(categorical_columns)
         self.min_count = min_count
         self.workers = workers
         self.seed = seed
-        self.save_doc2vec_model_path = save_doc2vec_model_path
+        self.save_model_path = save_model_path
         self.name = name
 
     def transform(self, dataframe):
+        dataframe['__user_document'] = ''
+        for c in self.categorical_columns:
+            dataframe['__user_document'] += dataframe[c].astype(str) + ' '
+
         documents = self.create_documents(dataframe)
-        model = Doc2Vec(documents=documents, 
-                        vector_size=self.n_components,
-                        window=self.window, 
-                        min_count=self.min_count, 
-                        workers=self.workers, 
-                        seed=self.seed)
-        if self.save_doc2vec_model_path is not None:
-            model.save(self.save_doc2vec_model_path)
-        features = dataframe[self.user_id_feature].apply(lambda x: model.docvecs[x])
-        features = self.get_feature(features, name=self.name)
-        return pd.concat([dataframe, features], axis=1)
+        model = Word2Vec(
+            documents, 
+            size=self.n_components,
+            window=self.window, 
+            min_count=self.min_count, 
+            workers=self.workers, 
+            seed=self.seed
+        )
+        if self.save_model_path is not None:
+            model.save(self.save_model_path)
+
+        result = []
+        for text in documents:
+            n_skip = 0
+            vecs = []
+            for n_w, word in enumerate(text):
+                try:
+                    vec_ = model.wv[word]
+                    vecs.append(vec_)
+                except:
+                    continue
+            if len(vecs) == 0:
+                result.append([[np.nan for _ in range(self.size)]])
+            else:
+                result.append(vecs)
+
+        self.columns = [self.name + '_' + str(i) + '_' + c for c in ['mean', 'max', 'min'] for i in range(self.n_components)]
+        mean_ = np.array([np.mean(r, axis=0) for r in result])
+        min_ = np.array([np.min(r, axis=0) for r in result])
+        max_ = np.array([np.max(r, axis=0) for r in result])
+        result = pd.DataFrame(np.concatenate([mean_, min_, max_], axis=1), columns=self.columns)
+        return result
 
     def create_documents(self, dataframe):
-        if self.sort_features is not None:
-            dataframe = dataframe.sort_values(self.sort_features)
-        documents = []
-        for user_id in dataframe[self.user_id_feature].unique():
-            words = dataframe.loc[dataframe[self.user_id_feature] == user_id, self.target_feature].values
-            documents.append(TaggedDocument(words=words, tags=[user_id]))
-        if self.sort_features is not None:
-            dataframe = dataframe.sort_index()
+        documents = [text_to_word_sequence(text) for text in dataframe['__user_document']]
         return documents
 
     def get_feature(self, features):
