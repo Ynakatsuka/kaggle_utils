@@ -235,7 +235,7 @@ class CategoryLagGroupbyTransformer(LagGroupbyTransformer):
         return self
 
     
-class CategoryShareGroupbyTransformer(LagGroupbyTransformer):
+class CategoryShareGroupbyTransformer(BaseGroupByTransformer):
     '''
         Example
         -------
@@ -310,6 +310,52 @@ class PrevCategoryShareGroupbyTransformer(CategoryShareGroupbyTransformer):
                 dataframe = pd.concat([dataframe, features[new_features]], axis=1)
         return dataframe
 
+    
+class CategoryShareRankGroupbyTransformer(BaseGroupByTransformer):
+    '''
+        Example
+        -------
+        param_dict = [
+            {
+                'key': ['day'], 
+                'var': ['device'], 
+            }
+        ]
+    '''
+
+    def __init__(self, param_dict=None, shift=1, fill_na=-1, sort_features=None):
+        super().__init__(param_dict)
+        self.shift = shift
+        self.fill_na = fill_na
+        self.sort_features = sort_features
+        self.agg = ['category_share_rank']
+
+    def _aggregate(self, dataframe):
+        self.features = []
+        if self.sort_features is not None:
+            dataframe = dataframe.sort_values(self.sort_features)
+        for param_dict in self.param_dict:
+            key, var, agg, on = self._get_params(param_dict)
+            all_features = list(set(key + var))
+            new_features = self._get_feature_names(key, var, agg)
+            
+            frac = dataframe[all_features].groupby(key+var).size().reset_index()
+            frac.columns = key + var + ['frac']
+            
+            denom = dataframe[all_features].groupby(key).size().reset_index()
+            denom.columns = key + ['denom']
+            
+            features = frac.merge(denom, on=key, how='inner')
+            features[new_features[0]] = features['frac'] / features['denom']
+            features = features[key + new_features]
+            features[new_features[0]] = features.groupby(key)[new_features[0]].rank()
+
+            features = change_dtype(features, columns=new_features)
+            self.features.append(features)
+        if self.sort_features is not None:
+            dataframe = dataframe.sort_index()
+        return self
+    
 
 class EWMGroupbyTransformer(BaseGroupByTransformer):
     '''
@@ -449,19 +495,20 @@ class TargetEncodingTransformer(BaseGroupByTransformer):
             feature = pd.DataFrame(np.empty([len(dataframe), len(self.var)]), columns=new_features)
 
             # for valid data
-            for fold_id in range(self.n_splits):
-                train_index = np.array(self.cvfold != fold_id).flatten()
-                valid_index = np.array(self.cvfold == fold_id).flatten()
+            for fold_id in range(self.n_splits):                
+                train_index = np.array(self.cvfold['train_id' + str(fold_id)]==fold_id).flatten()
+                valid_index = np.array(self.cvfold.valid_id==fold_id).flatten()
+
                 trn = train.loc[train_index, key + var]
                 val = train.loc[valid_index, key]
                 local_avg = trn[self.var].mean()
                 val = self._encode(trn, val, key, var, new_features, local_avg)
-                feature.iloc[:self.len_train, :].loc[valid_index] = val[new_features]
+                feature.iloc[:self.len_train, :].loc[valid_index] = val[new_features].values
 
             # for test data
             global_avg = train[var].mean()
             test = self._encode(train, test, key, var, new_features, global_avg)
-            feature.iloc[self.len_train:, :] = test[new_features]
+            feature.iloc[self.len_train:, :] = test[new_features].values
             self.features.append(feature)    
         return self
         
@@ -497,3 +544,123 @@ class BayesianTargetEncodingTransformer(TargetEncodingTransformer):
             
     def _get_feature_names(self, key, var, agg):
         return ['_'.join([a, str(self.l), v, 'groupby'] + key) for v in var for a in agg]
+    
+    
+class Seq2DecTargetEncodingTransformer(TargetEncodingTransformer):
+    '''
+        Example
+        -------
+        param_dict = [
+            {
+                'key': ['ip','hour'], 
+            }
+        ]
+    '''  
+
+    def __init__(self, target, n_splits, cvfold, len_train, param_dict=None):
+        super().__init__(target, n_splits, cvfold, len_train, param_dict)
+        # overwrite
+        self.agg = ['seq2dec_target_encoding']
+
+    def _encode(self, dataframe, merge_dataframe, key, var, new_features, avg):
+        g = dataframe[key + var].groupby(key)[self.var].apply(lambda x: ''.join(x.values.flatten().astype(str))).reset_index()
+        g.columns = key + new_features
+        g[new_features[0]] = g[new_features[0]].apply(lambda x: x[:1] + '.' + x[1:]).astype(float)
+        merge_dataframe = merge_dataframe.merge(g, on=key, how='left')
+        return merge_dataframe
+    
+    def _aggregate(self, dataframe):
+        train = dataframe[:self.len_train].reset_index(drop=True)
+        test = dataframe[self.len_train:].reset_index(drop=True)
+        
+        self.features = []
+        for param_dict in self.param_dict:
+            key, var, agg, on = self._get_params(param_dict)
+            all_features = list(set(key + var))
+            new_features = self._get_feature_names(key, var, agg)
+            feature = pd.DataFrame(np.empty([len(dataframe), len(self.var)]), columns=new_features)
+            feature[new_features[0]] = np.nan
+
+            # for valid data
+            for fold_id in range(self.n_splits):                
+                train_index = np.array(self.cvfold['train_id' + str(fold_id)]==fold_id).flatten()
+                valid_index = np.array(self.cvfold.valid_id==fold_id).flatten()
+
+                trn = train.loc[train_index, key + var].reset_index(drop=True)
+                val = train.loc[valid_index, key].reset_index(drop=True)
+                val = self._encode(trn, val, key, var, new_features, None)
+                
+                feature.iloc[:self.len_train, :].loc[valid_index] = val[new_features].values
+
+            # for test data
+            test = self._encode(train, test, key, var, new_features, None)
+            feature.iloc[self.len_train:, :] = test[new_features].values
+            self.features.append(feature)    
+        return self
+            
+    def _get_feature_names(self, key, var, agg):
+        return ['_'.join([a, v, 'groupby'] + key) for v in var for a in agg]
+
+    
+class EWMTargetEncodingTransformer(TargetEncodingTransformer):
+    '''
+        Example
+        -------
+        param_dict = [
+            {
+                'key': ['ip','hour'], 
+            }
+        ]
+    '''  
+    def __init__(self, target, n_splits, cvfold, len_train, param_dict=None, alpha=0.5, fill_na=-1, sort_features=None):
+        super().__init__(target, n_splits, cvfold, len_train, param_dict)
+        # overwrite
+        self.agg = ['ewm_target_encoding']
+        self.alpha = alpha
+        self.fill_na = fill_na
+        self.sort_features = sort_features
+        
+    def calc_shifted_ewm(self, series, adjust=True):
+        return series.shift().ewm(alpha=self.alpha, adjust=adjust).mean()
+
+    def _encode(self, dataframe, merge_dataframe, key, var, new_features, avg):
+        groupby = dataframe[key + var].groupby(key)
+        g = groupby[self.var].apply(self.calc_shifted_ewm)
+        keys = pd.DataFrame(groupby.groups.keys(), columns=key)
+        g = pd.concat([keys, g], axis=1)
+        g.columns = key + new_features
+        merge_dataframe = merge_dataframe.merge(g, on=key, how='left')
+        return merge_dataframe
+    
+    def _aggregate(self, dataframe):
+        train = dataframe[:self.len_train].reset_index(drop=True)
+        test = dataframe[self.len_train:].reset_index(drop=True)
+        
+        self.features = []
+        for param_dict in self.param_dict:
+            key, var, agg, on = self._get_params(param_dict)
+            all_features = list(set(key + var))
+            new_features = self._get_feature_names(key, var, agg)
+            feature = pd.DataFrame(np.empty([len(dataframe), len(self.var)]), columns=new_features)
+            feature[new_features[0]] = np.nan
+
+            # for valid data
+            for fold_id in range(self.n_splits):                
+                train_index = np.array(self.cvfold['train_id' + str(fold_id)]==fold_id).flatten()
+                valid_index = np.array(self.cvfold.valid_id==fold_id).flatten()
+
+                trn = train.loc[train_index, key + var].reset_index(drop=True)
+                val = train.loc[valid_index, key].reset_index(drop=True)
+                val = self._encode(trn, val, key, var, new_features, None)
+                
+                feature.iloc[:self.len_train, :].loc[valid_index] = val[new_features].values
+
+            # for test data
+            test = self._encode(train, test, key, var, new_features, None)
+            feature.iloc[self.len_train:, :] = test[new_features].values
+            self.features.append(feature)    
+        return self
+            
+    def _get_feature_names(self, key, var, agg):
+        return ['_'.join([a, v, 'groupby'] + key) for v in var for a in agg]
+    

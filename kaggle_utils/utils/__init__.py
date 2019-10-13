@@ -1,5 +1,7 @@
 import functools
 import gc
+import json
+import requests
 import time
 import numpy as np
 from IPython.display import display, Javascript
@@ -50,6 +52,37 @@ def submit(competition_name, file_path, comment='from API'):
 #     send_line(message.rstrip())
 
 
+class LINENotifyBot():
+    API_URL = 'https://notify-api.line.me/api/notify'
+    def __init__(self, access_token):
+        self.__headers = {'Authorization': 'Bearer ' + access_token}
+
+    def send(self, message, image=None, sticker_package_id=None, sticker_id=None):
+        payload = {
+            'message': message,
+            'stickerPackageId': sticker_package_id,
+            'stickerId': sticker_id,
+        }
+        files = {}
+        if image != None:
+            files = {'imageFile': open(image, 'rb')}
+        r = requests.post(
+            LINENotifyBot.API_URL,
+            headers=self.__headers,
+            data=payload,
+            files=files,
+        )
+
+
+class SpreadSheetBot():
+    def __init__(self, endpoint):
+        self.endpoint = endpoint
+        
+    def send(self, *args):
+        requests.post(self.endpoint, json.dumps(args))
+    
+    
+
 def change_dtype(dataframe, columns=None):
     if columns is None:
         columns = dataframe.columns
@@ -79,3 +112,13 @@ def change_dtype(dataframe, columns=None):
                     dataframe[col] = dataframe[col].astype(np.float64)
     gc.collect()
     return dataframe
+
+
+def to_category(train, cat=None):
+    if cat is None:
+        cat = [col for col in train.columns if train[col].dtype == 'object']
+    for c in cat:
+        train[c], uniques = pd.factorize(train[c])
+        maxvalue_dict[c] = train[c].max() + 1
+    gc.collect()
+    return train

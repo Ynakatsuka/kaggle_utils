@@ -1,4 +1,5 @@
 from . import features
-from . import utils
+from . import models
 from . import preprocess
+from . import utils
 from . import visualizations
