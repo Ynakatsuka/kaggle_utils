@@ -60,6 +60,8 @@ def get_importances_from_model(model, predictors, importance_type='gain'):
     elif hasattr(model, 'get_score'):
         if importance_type == 'split':
             importances = model.get_score(importance_type='weight')
+        elif importance_type == 'gain':
+            importances = model.get_score(importance_type='total_gain')
         else:
             importances = model.get_score(importance_type=importance_type)
         predictors = list(importances.keys())
