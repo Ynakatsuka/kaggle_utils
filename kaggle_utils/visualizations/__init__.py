@@ -16,21 +16,21 @@ def plot_all(task_type, df, model, true, pred, bins=50, base_path='./', name='',
         imp = get_importances_from_model(model, predictors, importance_type=importance_type)
         imp.to_pickle(importance_path)
         plot_feature_importances(imp, max_num=bins, importance_type=importance_type, path=base_path+f'{name}_importance_{importance_type}.png')
-        to_send[importance_type] = base_path+f'{name}_importance_{importance_type}.png'
+        to_send[name+'_'+importance_type] = base_path+f'{name}_importance_{importance_type}.png'
 
     if task_type in ['binary', 'regression']:
         plot_prediction_histogram(pred, bins=bins, path=base_path+f'{name}_histogram.png')
-        to_send['histogram'] = base_path+f'{name}_histogram.png'
+        to_send[name+'_'+'histogram'] = base_path+f'{name}_histogram.png'
         if (importance_path is not None) and (predictors is not None):
             pred_true_difference_features += list(imp.sort_values(importance_type, ascending=False)['feature'].iloc[:3])
         for feature in pred_true_difference_features:
             plot_pred_true_difference(df, true, pred, feature, topn=bins, path=base_path+f'{name}_pred_true_difference_per_{feature}.png')
-            to_send[f'pred_true_difference_per_{feature}'] = base_path+f'{name}_pred_true_difference_per_{feature}.png'
+            to_send[name+'_'+f'pred_true_difference_per_{feature}'] = base_path+f'{name}_pred_true_difference_per_{feature}.png'
         plot_lift_chart(true, pred, bins=bins, path=base_path+f'{name}_lift_chart.png')
-        to_send['lift_chart'] = base_path+f'{name}_lift_chart.png'
+        to_send[name+'_'+'lift_chart'] = base_path+f'{name}_lift_chart.png'
     elif task_type == 'multiclass':
         plot_confusion_matrix(true, pred, classes, path=base_path+f'{name}_confusion_matrix.png')
-        to_send['lift_chart'] = base_path+f'{name}_lift_chart.png'
+        to_send[name+'_'+'lift_chart'] = base_path+f'{name}_lift_chart.png'
     else:
         print('Unsupported task type.')
     if bot is not None:
