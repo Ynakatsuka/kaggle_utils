@@ -65,7 +65,7 @@ def save_notebook(current_ipynb_path, save_ipynb_path):
 
 
 def submit(competition_name, file_path, comment='from API'):
-    os.system(f'kaggle competitions submit -c {competition_name} -f {file_path} -m '{comment}'')
+    os.system(f'kaggle competitions submit -c {competition_name} -f {file_path} -m "{comment}"')
     time.sleep(60)
     tmp = os.popen(f'kaggle competitions submissions -c {COMPETITION_NAME} -v | head -n 2').read()
     col, values = tmp.strip().split('\n')

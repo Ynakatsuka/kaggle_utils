@@ -10,4 +10,4 @@ WIP
 ## Install
 git clone https://github.com/Ynakatsuka/kaggle_utils  
 cd kaggle_utils  
-pip install.
+pip install .
