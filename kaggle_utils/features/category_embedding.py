@@ -24,7 +24,7 @@ class CategoryVectorizer(BaseFeatureTransformer):
         self.name = name + str(self.n_components)
 
     def transform(self, dataframe):
-        features = []
+        self.features = []
         for (col1, col2) in self.get_column_pairs():
             if (self.threshold is not None) and (normalized_mutual_info_score(dataframe[c1], dataframe[c2], average_method='arithmetic') > self.threshold):
                 try:
@@ -32,11 +32,11 @@ class CategoryVectorizer(BaseFeatureTransformer):
                     sentence = self.vectorizer.fit_transform(sentence)
                     feature = self.transformer.fit_transform(sentence)
                     feature = self.get_feature(dataframe, col1, col2, feature, name=self.name)
-                    features.append(feature)
+                    self.features.append(feature)
                 except:
                     print(f'passing {col1} and {col2}')
-        features = pd.concat(features, axis=1)
-        return features
+        dataframe = pd.concat([dataframe]+self.features, axis=1)
+        return dataframe
 
     def create_word_list(self, dataframe, col1, col2):
         col1_size = int(dataframe[col1].values.max() + 1)
@@ -76,7 +76,7 @@ class CategoryNMFVectorizer(CategoryVectorizer):
         self.name = name + str(self.n_components)
 
     def transform(self, dataframe):
-        features = []
+        self.features = []
         for (col1, col2) in self.get_column_pairs():
             if (self.threshold is not None) and (normalized_mutual_info_score(dataframe[c1], dataframe[c2], average_method='arithmetic') > self.threshold):
                 try:
@@ -85,11 +85,11 @@ class CategoryNMFVectorizer(CategoryVectorizer):
                     feature1 = self.transformer.fit_transform(sentence)
                     feature2 = self.transformer.components_
                     feature = self.get_feature(dataframe, col1, col2, feature1, feature2, name=self.name)
-                    features.append(feature)
+                    self.features.append(feature)
                 except:
                     print(f'passing {col1} and {col2}')
-        features = pd.concat(features, axis=1)
-        return features
+        dataframe = pd.concat([dataframe]+self.features, axis=1)
+        return dataframe
     
     def get_feature(self, dataframe, col1, col2, latent_vector1, latent_vector2, name=''):
         features = np.zeros(
@@ -139,10 +139,12 @@ class CategoryUser2Vec(BaseFeatureTransformer):
         feature = self.get_feature(df, feature, name=self.name)
         feature['__user_id'] = user_ids
         
-        # merge)
-        df = df.merge(feature, on='__user_id', how='left')
+        # merge
+        df = df.merge(feature, on='__user_id', how='left').reset_index(drop=True)[self.columns]
+        self.features = [df]
+        dataframe = pd.concat([dataframe, df], axis=1)
         
-        return df[self.columns]
+        return dataframe
    
     def get_feature(self, dataframe, latent_vector, name=''):
         self.columns = ['_'.join([name, 'category_user2vec', str(i)])
@@ -202,9 +204,11 @@ class CategoryUser2VecWithW2V(CategoryUser2Vec):
         features = self.aggregate_documents(documents, vocab_vectors)
 
         # merge
-        df = df.merge(features, on='__user_id', how='left')
-
-        return df[self.columns]
+        df = df.merge(feature, on='__user_id', how='left').reset_index(drop=True)[self.columns]
+        self.features = [df]
+        dataframe = pd.concat([dataframe, df], axis=1)
+        
+        return dataframe
    
     def aggregate_documents(self, documents, vocab_vectors):
         w = documents.apply(lambda sentence: self._aggregate_documents([vocab_vectors.loc[:, w] for w in sentence]))
@@ -281,8 +285,11 @@ class Category2VecWithW2V(BaseFeatureTransformer):
         mean_ = np.array([np.mean(r, axis=0) for r in result])
         min_ = np.array([np.min(r, axis=0) for r in result])
         max_ = np.array([np.max(r, axis=0) for r in result])
-        result = pd.DataFrame(np.concatenate([mean_, min_, max_], axis=1), columns=self.columns)
-        return result
+        feature = pd.DataFrame(np.concatenate([mean_, min_, max_], axis=1), columns=self.columns)
+        self.features = [feature]
+        dataframe = pd.concat([dataframe, feature], axis=1)
+        
+        return dataframe
 
     def create_documents(self, dataframe):
         documents = [text_to_word_sequence(text) for text in dataframe['__user_document']]

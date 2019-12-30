@@ -1,9 +1,10 @@
 import gc
+from joblib import Parallel, delayed
+
 import numpy as np
 import pandas as pd
 from scipy.stats import skew, kurtosis
 from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.externals.joblib import Parallel, delayed
 from sklearn.utils.validation import check_is_fitted, column_or_1d, _num_samples
 
     

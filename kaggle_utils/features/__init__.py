@@ -3,8 +3,12 @@ from sklearn.metrics import normalized_mutual_info_score
 from .base import *
 from .category_embedding import *
 from .category_encoding import *
+from .graph import *
 from .groupby import *
+from .image import *
+# from .image_pretrained import *
 from .row_aggregations import *
+from .text import *
 
 
 def merge_columns(dataframe, columns):
