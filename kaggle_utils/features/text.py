@@ -1,11 +1,14 @@
 import os
 
+from gensim.models.doc2vec import Doc2Vec, TaggedDocument
+import nltk
 import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.decomposition import TruncatedSVD
 from sklearn.feature_extraction.text import CountVectorizer
 import tensorflow_hub as hub
+from tensorflow.keras.preprocessing.text import text_to_word_sequence
 from transformers import pipeline
 
 from .base import BaseFeatureTransformer
@@ -36,7 +39,25 @@ class BasicTextFeatureTransformer(BaseFeatureTransformer):
         return dataframe
 
 
-class TextVectorizer(BaseFeatureTransformer):
+class TextVectorizer(BaseFeatureTransformer): 
+    '''
+    from sklearn.decomposition import TruncatedSVD, NMF
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.pipeline import make_pipeline, make_union
+    
+    vectorizer = make_pipeline(
+        TfidfVectorizer(),
+        make_union(
+            TruncatedSVD(n_components=n_components, random_state=seed),
+            NMF(n_components=n_components, random_state=seed),
+            make_pipeline(
+                BM25Transformer(use_idf=True, k1=2.0, b=0.75),
+                TruncatedSVD(n_components=n_components, random_state=seed)
+            ),
+            n_jobs=1,
+        ),
+    )
+    '''
     def __init__(self, text_columns,
                  vectorizer=CountVectorizer(), 
                  transformer=TruncatedSVD(n_components=128),
@@ -58,6 +79,31 @@ class TextVectorizer(BaseFeatureTransformer):
         dataframe = pd.concat([dataframe]+features, axis=1)
         return dataframe
     
+    
+class Doc2VecFeatureTransformer(BaseFeatureTransformer):
+    def __init__(self, text_columns, name='doc2vec'):
+        self.text_columns = text_columns
+        self.name = name
+    
+    def transform(self, dataframe):
+        self.features = []
+        for c in self.text_columns:
+            texts = dataframe[c].astype(str)
+            corpus = [TaggedDocument(words=text, tags=[i]) for i, text in enumerate(texts)]
+            model = Doc2Vec(documents=corpus)
+            result = np.array([model.infer_vector(text.split('. ')) for text in texts])
+            features = pd.DataFrame({
+                f'{self.name}_mean': np.mean(result, axis=1),
+                f'{self.name}_median': np.median(result, axis=1),
+                f'{self.name}_sum': np.sum(result, axis=1),
+                f'{self.name}_max': np.max(result, axis=1),
+                f'{self.name}_min': np.min(result, axis=1),
+                f'{self.name}_var': np.var(result, axis=1), 
+            })
+            self.features.append(features)
+        dataframe = pd.concat([dataframe]+self.features, axis=1)
+        return dataframe
+
     
 class EmojiFeatureTransformer(BaseFeatureTransformer):
     def __init__(self, text_columns):
@@ -102,6 +148,10 @@ class W2VFeatureTransformer(BaseFeatureTransformer):
     model = word2vec.Word2Vec.load('../data/w2v.model')
     # model = KeyedVectors.load_word2vec_format(path, binary=True)
     '''
+    ps = nltk.stem.PorterStemmer()
+    lc = nltk.stem.lancaster.LancasterStemmer()
+    sb = nltk.stem.snowball.SnowballStemmer('english')
+    
     def __init__(self, text_columns, model, name='w2v'):
         self.text_columns = text_columns
         self.model = model
@@ -111,6 +161,7 @@ class W2VFeatureTransformer(BaseFeatureTransformer):
         self.features = []
         for c in self.text_columns:
             texts = dataframe[c].astype(str)
+            texts = [text_to_word_sequence(text) for text in texts]
             result = []
             for text in texts:
                 n_skip = 0
@@ -118,6 +169,30 @@ class W2VFeatureTransformer(BaseFeatureTransformer):
                 for n_w, word in enumerate(text):
                     if self.model.__contains__(word):
                         vec = vec + self.model[word]
+                        continue
+                    word_ = word.upper()
+                    if self.model.__contains__(word_):
+                        vec = vec + self.model[word_]
+                        continue
+                    word_ = word.capitalize()
+                    if self.model.__contains__(word_):
+                        vec = vec + self.model[word_]
+                        continue
+                    word_ = self.ps.stem(word)
+                    if self.model.__contains__(word_):
+                        vec = vec + self.model[word_]
+                        continue
+                    word_ = self.lc.stem(word)
+                    if self.model.__contains__(word_):
+                        vec = vec + self.model[word_]
+                        continue
+                    word_ = self.sb.stem(word)
+                    if self.model.__contains__(word_):
+                        vec = vec + self.model[word_]
+                        continue
+                    else:
+                        n_skip += 1
+                        continue
                 vec = vec / (n_w - n_skip + 1)
                 result.append(vec)
             result = pd.DataFrame(
