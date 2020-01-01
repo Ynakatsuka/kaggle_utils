@@ -6,7 +6,7 @@ from .category_encoding import *
 from .graph import *
 from .groupby import *
 from .image import *
-# from .image_pretrained import *
+from .image_pretrained import *
 from .row_aggregations import *
 from .text import *
 
