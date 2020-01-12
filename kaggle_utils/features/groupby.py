@@ -1,6 +1,9 @@
 import gc
+
 import numpy as np
 import pandas as pd
+from sklearn.model_selection import BaseCrossValidator
+
 from .base import BaseFeatureTransformer
 from ..utils import change_dtype
 
@@ -534,6 +537,7 @@ class TargetEncodingTransformer(BaseGroupByTransformer):
         param_dict = [
             {
                 'key': ['ip','hour'], 
+                'agg': ['mean', 'max']
             }
         ]
     '''
@@ -548,13 +552,24 @@ class TargetEncodingTransformer(BaseGroupByTransformer):
             self.var = [target]
         else:
             self.var = target
-        self.agg = ['encoding']
         self.n_splits = n_splits
         self.cvfold = cvfold
         self.len_train = len_train
         
-    def _encode(self, dataframe, merge_dataframe, key, var, new_features, avg):
-        g = dataframe[key + var].groupby(key)[var].agg('mean').reset_index()
+    def _split_kfold(self, cvfold):
+        if isinstance(cvfold, pd.DataFrame):
+            for fold_id in range(self.n_splits):                
+                train_index = np.array(self.cvfold['train_id' + str(fold_id)]==fold_id).flatten()
+                valid_index = np.array(self.cvfold.valid_id==fold_id).flatten()
+                yield train_index, valid_index
+        elif isinstance(cvfold, BaseCrossValidator):
+            for train_index, valid_index in cvfold.split(range(self.len_train)):
+                yield train_index, valid_index
+        else:
+            raise ValueError('invalid cross validater')
+        
+    def _encode(self, dataframe, merge_dataframe, key, var, agg, new_features, avg):
+        g = dataframe[key + var].groupby(key)[var].agg(agg).reset_index()
         g.columns = key + new_features
         g = change_dtype(g, columns=new_features)
         g[new_features] = g[new_features].fillna(avg)
@@ -569,22 +584,21 @@ class TargetEncodingTransformer(BaseGroupByTransformer):
             key, var, agg, on = self._get_params(param_dict)
             all_features = list(set(key + var))
             new_features = self._get_feature_names(key, var, agg)
-            feature = pd.DataFrame(np.empty([len(dataframe), len(self.var)]), columns=new_features)
+            feature = pd.DataFrame(
+                np.empty([len(dataframe), len(self.var)*len(agg)]), columns=new_features
+            )
 
             # for valid data
-            for fold_id in range(self.n_splits):                
-                train_index = np.array(self.cvfold['train_id' + str(fold_id)]==fold_id).flatten()
-                valid_index = np.array(self.cvfold.valid_id==fold_id).flatten()
-
+            for train_index, valid_index in self._split_kfold(self.cvfold):
                 trn = train.loc[train_index, key + var]
                 val = train.loc[valid_index, key]
-                local_avg = trn[self.var].mean()
-                val = self._encode(trn, val, key, var, new_features, local_avg)
+                local_avg = trn[self.var].agg(agg)
+                val = self._encode(trn, val, key, var, agg, new_features, local_avg)
                 feature.iloc[:self.len_train, :].loc[valid_index] = val[new_features].values
 
             # for test data
-            global_avg = train[var].mean()
-            test = self._encode(train, test, key, var, new_features, global_avg)
+            global_avg = train[var].agg(agg)
+            test = self._encode(train, test, key, var, agg, new_features, global_avg)
             feature.iloc[self.len_train:, :] = test[new_features].values
             self.features.append(feature)    
         return self
@@ -593,7 +607,7 @@ class TargetEncodingTransformer(BaseGroupByTransformer):
         if not self.fitted:
             self._aggregate(dataframe)
         return self._merge(dataframe, merge=False)
-    
+
 
 class BayesianTargetEncodingTransformer(TargetEncodingTransformer):
     '''
@@ -611,7 +625,7 @@ class BayesianTargetEncodingTransformer(TargetEncodingTransformer):
         # overwrite
         self.agg = ['bayesian_encoding']
 
-    def _encode(self, dataframe, merge_dataframe, key, var, new_features, avg):
+    def _encode(self, dataframe, merge_dataframe, key, var, agg, new_features, avg):
         g = dataframe[key + var].groupby(key)[self.var].agg(['sum', 'count']).reset_index()
         g.columns = key + ['sum', 'count']
         g[new_features[0]] = ((g['sum'] + (self.l * avg).values) / (g['count'] + self.l)).fillna(avg)
@@ -638,7 +652,7 @@ class Seq2DecTargetEncodingTransformer(TargetEncodingTransformer):
         # overwrite
         self.agg = ['seq2dec_target_encoding']
 
-    def _encode(self, dataframe, merge_dataframe, key, var, new_features, avg):
+    def _encode(self, dataframe, merge_dataframe, key, var, agg, new_features, avg):
         g = dataframe[key + var].groupby(key)[self.var].apply(lambda x: ''.join(x.values.flatten().astype(str))).reset_index()
         g.columns = key + new_features
         g[new_features[0]] = g[new_features[0]].apply(lambda x: x[:1] + '.' + x[1:]).astype(float)
@@ -663,12 +677,12 @@ class Seq2DecTargetEncodingTransformer(TargetEncodingTransformer):
 
                 trn = train.loc[train_index, key + var].reset_index(drop=True)
                 val = train.loc[valid_index, key].reset_index(drop=True)
-                val = self._encode(trn, val, key, var, new_features, None)
+                val = self._encode(trn, val, key, var, agg, new_features, None)
                 
                 feature.iloc[:self.len_train, :].loc[valid_index] = val[new_features].values
 
             # for test data
-            test = self._encode(train, test, key, var, new_features, None)
+            test = self._encode(train, test, key, var, agg, new_features, None)
             feature.iloc[self.len_train:, :] = test[new_features].values
             self.features.append(feature)    
         return self
@@ -698,7 +712,7 @@ class EWMTargetEncodingTransformer(TargetEncodingTransformer):
     def calc_shifted_ewm(self, series, adjust=True):
         return series.shift().ewm(alpha=self.alpha, adjust=adjust).mean()
 
-    def _encode(self, dataframe, merge_dataframe, key, var, new_features, avg):
+    def _encode(self, dataframe, merge_dataframe, key, var, agg, new_features, avg):
         groupby = dataframe[key + var].groupby(key)
         g = groupby[self.var].apply(self.calc_shifted_ewm)
         keys = pd.DataFrame(groupby.groups.keys(), columns=key)
@@ -725,12 +739,12 @@ class EWMTargetEncodingTransformer(TargetEncodingTransformer):
 
                 trn = train.loc[train_index, key + var].reset_index(drop=True)
                 val = train.loc[valid_index, key].reset_index(drop=True)
-                val = self._encode(trn, val, key, var, new_features, None)
+                val = self._encode(trn, val, key, var, agg, new_features, None)
                 
                 feature.iloc[:self.len_train, :].loc[valid_index] = val[new_features].values
 
             # for test data
-            test = self._encode(train, test, key, var, new_features, None)
+            test = self._encode(train, test, key, var, agg, new_features, None)
             feature.iloc[self.len_train:, :] = test[new_features].values
             self.features.append(feature)    
         return self
