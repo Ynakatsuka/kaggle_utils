@@ -7,6 +7,7 @@ from sklearn.metrics import normalized_mutual_info_score
 from .base import *
 from .category_embedding import *
 from .category_encoding import *
+from .dae import *
 from .graph import *
 from .groupby import *
 from .image import *
