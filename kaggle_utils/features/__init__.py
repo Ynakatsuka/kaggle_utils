@@ -13,6 +13,7 @@ from .groupby import *
 from .image import *
 from .image_pretrained import *
 from .row_aggregations import *
+from .selection import *
 from .text import *
 
 
