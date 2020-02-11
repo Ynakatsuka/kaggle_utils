@@ -757,3 +757,61 @@ class EWMTargetEncodingTransformer(TargetEncodingTransformer):
     def _get_feature_names(self, key, var, agg):
         return ['_'.join([a, v, 'groupby'] + key) for v in var for a in agg]
     
+    
+class TopFrequencyGroupbyTransformer(BaseGroupByTransformer):
+    '''
+        Example
+        -------
+        param_dict = [
+            {
+                'key': ['ip','hour'], 
+                'var': ['time'], 
+            }
+        ]
+    '''
+    def __init__(self, param_dict=None):
+        super().__init__(param_dict)
+        self.agg = ['top_frequency']
+
+    def _aggregate(self, dataframe):
+        for param_dict in self.param_dict:
+            key, var, agg, on = self._get_params(param_dict)
+            all_features = list(set(key + var))
+            new_features = self._get_feature_names(key, var, agg)
+            g = dataframe[all_features].groupby(key)[var].agg(
+                lambda x: pd.Series.mode(x)[0]
+            ).reset_index()
+            g.columns = key + new_features
+            features = dataframe[key].merge(g, on=key, how='left')[new_features]
+            self.features.append(features)
+        return self
+    
+    def transform(self, dataframe):
+        if not self.fitted:
+            self._aggregate(dataframe)
+        return self._merge(dataframe, merge=False)
+
+
+class DiffTopFrequencyGroupbyTransformer(BaseGroupByTransformer):
+    def __init__(self, param_dict=None):
+        self.param_dict = param_dict
+        self.agg = ['top_frequency']
+    
+    def transform(self, dataframe):
+        for param_dict in self.param_dict:
+            key, var, agg, on = self._get_params(param_dict)
+            for a in agg:
+                for v in var:
+                    new_feature = '_'.join(['diff', a, v, 'groupby'] + key)
+                    base_feature = '_'.join([a, v, 'groupby'] + key)
+                    dataframe[new_feature] = dataframe[base_feature] - dataframe[v]
+        return dataframe
+    
+    def _get_feature_names(self, key, var, agg):
+        _agg = []
+        for a in agg:
+            if not isinstance(a, str):
+                _agg.append(a.__name__)
+            else:
+                _agg.append(a)
+        return ['_'.join(['diff', a, v, 'groupby'] + key) for v in var for a in _agg]
