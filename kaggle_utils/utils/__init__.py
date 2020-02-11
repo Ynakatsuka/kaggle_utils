@@ -12,8 +12,9 @@ import pandas as pd
 from sklearn.preprocessing import LabelEncoder
 from sklearn.utils.validation import check_is_fitted, column_or_1d
 
-from .sampling import *
+from .folds import *
 from .load import *
+from .sampling import *
 
 
 def init_logger(file='log.txt'):
