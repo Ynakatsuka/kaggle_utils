@@ -1,11 +1,10 @@
 from collections import Counter, defaultdict
 
 import numpy as np
-from sklearn.model_selection import BaseCrossValidator
 from sklearn.utils import check_random_state
 
 
-class RepeatedStratifiedGroupKFold(BaseCrossValidator):
+class RepeatedStratifiedGroupKFold():
     '''
     Ref: from https://github.com/scikit-learn/scikit-learn/issues/13621
     '''

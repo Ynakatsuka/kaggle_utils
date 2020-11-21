@@ -20,6 +20,7 @@ def plot_all(task_type, df, model, true, pred, bins=50, base_path='./', name='',
 
     if task_type in ['binary', 'regression']:
         plot_prediction_histogram(pred, bins=bins, path=base_path+f'{name}_histogram.png')
+        plot_true_prediction_histogram(true, pred, path=base_path+f'{name}_true_pred_histogram.png')
         to_send[name+'_'+'histogram'] = base_path+f'{name}_histogram.png'
         if (importance_path is not None) and (predictors is not None):
             pred_true_difference_features += list(imp.sort_values(importance_type, ascending=False)['feature'].iloc[:3])
@@ -48,6 +49,7 @@ def plot_confusion_matrix(true, pred, classes,
         true: true labels, not one-hot vectors
         pred: results of predict_proba
     '''
+    plt.clf()
     # compute cofusion_matrix
     pred = np.argmax(pred, axis=1)
     cm = confusion_matrix(true, pred)
@@ -57,7 +59,7 @@ def plot_confusion_matrix(true, pred, classes,
 
     # plot
     plt.clf()
-    plt.figure(figsize=(12, 12))
+#     plt.figure(figsize=(12, 12))
     plt.imshow(cm, interpolation='nearest', cmap=cmap)
     plt.title('Confusion matrix')
     plt.colorbar()
@@ -76,7 +78,8 @@ def plot_confusion_matrix(true, pred, classes,
     plt.tight_layout()
     if path is not None:
         plt.savefig(path)
-
+    plt.cla(); plt.clf(); plt.close()
+    
 
 def get_importances_from_model(model, predictors, importance_type='gain'):
     # lightgbm
@@ -111,13 +114,14 @@ def plot_feature_importances(importances, max_num=50, importance_type='gain', pa
     importances = importances.sort_values(importance_type, ascending=False).iloc[:max_num]
 
     plt.clf()
-    plt.figure(figsize=(16, 6))
+#     plt.figure(figsize=(16, 6))
     sns.barplot(x=importance_type, y='feature', data=importances, orient='h')
     plt.title(importance_type)
     plt.tight_layout()
     if path is not None:
         plt.savefig(path)
-        
+    plt.cla(); plt.clf(); plt.close()
+
 
 def plot_mean_feature_importances(feature_importances, max_num=50, importance_type='gain', path=None):
     mean_gain = feature_importances[[importance_type, 'feature']].groupby('feature').mean()
@@ -125,20 +129,34 @@ def plot_mean_feature_importances(feature_importances, max_num=50, importance_ty
     data = feature_importances.sort_values('mean_'+importance_type, ascending=False).iloc[:max_num]
 
     plt.clf()
-    plt.figure(figsize=(16, 6))
+#     plt.figure(figsize=(16, 6))
     sns.barplot(x=importance_type, y='feature', data=data)
     plt.tight_layout()
     if path is not None:
         plt.savefig(path)
+    plt.cla(); plt.clf(); plt.close()
 
 
 def plot_prediction_histogram(pred, bins=100, path=None):
     plt.clf()
-    plt.figure(figsize=(12, 6))
+#     plt.figure(figsize=(18, 9))
     plt.hist(pred, bins=bins)
     plt.title('Histogram')
     if path is not None:
         plt.savefig(path)
+    plt.cla(); plt.clf(); plt.close()
+    
+    
+def plot_true_prediction_histogram(true, pred, path=None):
+    df = pd.DataFrame({'true': true, 'pred': pred})
+    min_ = min(true.min(), pred.min())
+    max_ = max(true.max(), pred.max())
+    plt.clf()
+#     plt.figure(figsize=(18, 9))
+    sns.jointplot('true', 'pred', df, xlim=(min_, max_), ylim=(min_, max_))
+    if path is not None:
+        plt.savefig(path)
+    plt.cla(); plt.clf(); plt.close()
 
 
 def plot_pred_true_difference(dataframe, true, pred, col, topn=50, path=None):
@@ -159,6 +177,11 @@ def plot_pred_true_difference(dataframe, true, pred, col, topn=50, path=None):
         keys = [k for k in g.groups.keys()]
     else:
         keys = [f'{k:.2f}' for k in g.groups.keys()]
+    try:
+        keys = [float(k) for k in keys]    
+    except:
+        pass
+    
     ax2.bar(keys, g['true'].count(), align='center', color='gray', alpha=0.5)
     ax1.plot(keys, m['pred'], marker='.', markersize=14)
     ax1.plot(keys, m['true'], marker='.', markersize=14)
@@ -171,6 +194,7 @@ def plot_pred_true_difference(dataframe, true, pred, col, topn=50, path=None):
     plt.title(f'predicted values v.s. true values per {col}')
     if path is not None:
         plt.savefig(path)
+    plt.cla(); plt.clf(); plt.close()
 
 
 def plot_lift_chart(true, pred, bins=50, path=None):
@@ -183,4 +207,4 @@ def plot_lift_chart(true, pred, bins=50, path=None):
     plt.title('Lift Chart')
     if path is not None:
         plt.savefig(path)
-        
+    plt.cla(); plt.clf(); plt.close()

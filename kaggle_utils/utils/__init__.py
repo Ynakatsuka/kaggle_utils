@@ -146,24 +146,43 @@ def to_category(train, cat=None):
 
 class TolerantLabelEncoder(LabelEncoder):
     def __init__(self, ignore_unknown=True):
+        """Tolerant label encoder which allows unseen labels"""
         self.ignore_unknown = ignore_unknown
+        
+    def fit(self, X, y=None):
+        _, uniques = pd.factorize(X)
+        self.classes_ = uniques
+        self.classes_map_ = {k: v for k, v in zip(uniques, range(len(uniques)))}
 
     def transform(self, X, y=None):
         check_is_fitted(self, 'classes_')
         X = column_or_1d(X, warn=True)
 
-        indices = np.isin(X, self.classes_)
+        if not isinstance(X, pd.Series):
+            X = pd.Series(X)
+        else:
+            X = pd.Series(X.values)
+
+        indices = X.isin(self.classes_)
+        nan_indices = X.isnull()        
+
         if not self.ignore_unknown and not np.all(indices):
             raise ValueError('X contains new labels: %s' 
                                          % str(np.setdiff1d(X, self.classes_)))
 
-        X_transformed = np.searchsorted(self.classes_, X)
+        X_transformed = X.map(self.classes_map_)
         X_transformed[~indices] = len(self.classes_)
-        return X_transformed
+        X_transformed[nan_indices] = -1
+        return X_transformed.values
+    
+    def fit_transform(self, X, y=None):
+        codes, uniques = pd.factorize(X)
+        self.classes_ = uniques
+        self.classes_map_ = {k: v for k, v in zip(uniques, range(len(uniques)))}
+        return codes
 
     def inverse_transform(self, X):
         check_is_fitted(self, 'classes_')
-
         labels = np.arange(len(self.classes_))
         indices = np.isin(X, labels)
         if not self.ignore_unknown and not np.all(indices):
@@ -171,5 +190,55 @@ class TolerantLabelEncoder(LabelEncoder):
                                          % str(np.setdiff1d(X, self.classes_)))
 
         X_transformed = np.asarray(self.classes_[X], dtype=object)
-        X_transformed[~indices] = 'unknown'
+        X_transformed[~indices] = '_unknown'
+        X_transformed[X==-1] = np.nan
         return X_transformed
+
+
+class TolerantLabelEncoderOnMultipleCategories(LabelEncoder):
+    def __init__(self, categorical_features, ignore_unknown=True):
+        self.categorical_features = categorical_features
+        self.ignore_unknown = ignore_unknown
+        self.encoders = {}
+        for f in self.categorical_features:
+            self.encoders[f] = TolerantLabelEncoder(ignore_unknown)
+
+    def fit(self, X):
+        """
+        Parameters
+        ----------
+        X : pd.DataFrame
+        """        
+        for f in self.categorical_features:
+            self.encoders[f].fit(X[f])
+        return self
+
+    def fit_transform(self, X):
+        """
+        Parameters
+        ----------
+        X : pd.DataFrame
+        """        
+        for f in self.categorical_features:
+            X[f] = self.encoders[f].fit_transform(X[f])
+        return X
+
+    def transform(self, X):
+        """
+        Parameters
+        ----------
+        X : pd.DataFrame
+        """        
+        for f in self.categorical_features:
+            X[f] = self.encoders[f].transform(X[f])
+        return X
+
+    def inverse_transform(self, X):
+        """
+        Parameters
+        ----------
+        X : pd.DataFrame
+        """      
+        for f in self.categorical_features:
+            X[f] = self.encoders[f].inverse_transform(X[f])
+        return X   

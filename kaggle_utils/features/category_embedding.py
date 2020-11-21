@@ -1,6 +1,6 @@
 import itertools
 import gc
-from keras.preprocessing.text import text_to_word_sequence
+from tensorflow.keras.preprocessing.text import text_to_word_sequence
 import numpy as np
 import pandas as pd
 from gensim.models import Word2Vec

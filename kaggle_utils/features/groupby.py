@@ -138,6 +138,9 @@ class DiffGroupbyTransformer(BaseGroupByTransformer):
             self.features.append(features)
         return self
     
+    def fit(self, dataframe):
+        return self
+    
     def transform(self, dataframe):
         if len(self.features):
             dataframe = self._merge(dataframe, merge=True)
@@ -209,6 +212,9 @@ class RatioGroupbyTransformer(BaseGroupByTransformer):
             self.features.append(features)
         return self
     
+    def fit(self, dataframe):
+        return self
+
     def transform(self, dataframe):
         if len(self.features):
             dataframe = self._merge(dataframe, merge=True)
@@ -284,6 +290,45 @@ class LagGroupbyTransformer(BaseGroupByTransformer):
 
     def _get_feature_names(self, key, var, agg):
         return ['_'.join([a, str(self.shift), v, 'groupby'] + key) for v in var for a in agg]
+    
+    
+class RatioLagGroupbyTransformer(LagGroupbyTransformer):
+    '''
+        Example
+        -------
+        param_dict = [
+            {
+                'key': ['ip','hour'], 
+                'var': ['time'], 
+            }
+        ]
+    '''
+    def __init__(self, param_dict=None, shift=1, fill_na=-1, sort_features=None):
+        super().__init__(param_dict)
+        self.shift = shift
+        self.fill_na = fill_na
+        self.sort_features = sort_features
+        self.agg = ['ratio_lag']
+
+    def _aggregate(self, dataframe):
+        if self.sort_features is not None:
+            dataframe = dataframe.sort_values(self.sort_features)
+        for param_dict in self.param_dict:
+            key, var, agg, on = self._get_params(param_dict)
+            all_features = list(set(key + var))
+            new_features = self._get_feature_names(key, var, agg)
+            features = dataframe[all_features].groupby(key)[var].shift(-self.shift) / dataframe[var]
+            features.columns = new_features
+            for c in new_features:
+                if features[c].dtype in ['float16', 'float32', 'float64']:
+                    features[c] = features[c].astype('float32')
+                else:
+                    features[c] = features[c].dt.seconds.astype('float32')
+            features = features.fillna(self.fill_na)
+            self.features.append(features)
+        if self.sort_features is not None:
+            dataframe = dataframe.sort_index()
+        return self
 
 
 class CategoryLagGroupbyTransformer(LagGroupbyTransformer):
@@ -541,7 +586,7 @@ class TargetEncodingTransformer(BaseGroupByTransformer):
             }
         ]
     '''
-    def __init__(self, target, n_splits, cvfold, len_train, min_count=1, param_dict=None):
+    def __init__(self, target, n_splits, cvfold, min_count=1, param_dict=None):
         '''
             Params
             ------

@@ -45,8 +45,10 @@ def get_time_features(dataframe, time_column):
     dataframe[time_column+'_day'] = dataframe[time_column].dt.day
     dataframe[time_column+'_dayofweek'] = dataframe[time_column].dt.dayofweek
     dataframe[time_column+'_weekofyear'] = dataframe[time_column].dt.weekofyear
+    dataframe[time_column+'_weekofmonth'] = dataframe[time_column].dt.day // 7
     dataframe[time_column+'_is_weekend'] = (dataframe[time_column].dt.weekday>=5).astype(np.uint8)
     dataframe[time_column+'_month'] = dataframe[time_column].dt.month
+    dataframe[time_column+'_year'] = dataframe[time_column].dt.year
     dataframe[time_column+'_hour'] = dataframe[time_column].dt.hour
     dataframe[time_column+'_minute'] = dataframe[time_column].dt.minute
     dataframe[time_column+'_second'] = dataframe[time_column].dt.second

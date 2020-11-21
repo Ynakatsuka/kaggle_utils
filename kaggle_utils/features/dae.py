@@ -44,12 +44,15 @@ class DAEDataLoader(Sequence):
 class DAETransformer(BaseFeatureTransformer):
     def __init__(
         self, categorical_features, numerical_features,
-        swap_rate=0.15, batch_size=128, epochs=100, optimizer=optimizers.Adam(),
+        numerical_preprocessor=QuantileTransformer(),
+        swap_rate=0.15, batch_size=128, epochs=100, 
+        optimizer=optimizers.Adam(),
         loss='mse', metrics=['mse'],
         n_units=500, n_layers=3, name='dae'
     ):
         self.categorical_features = categorical_features
         self.numerical_features = numerical_features
+        self.numerical_preprocessor = numerical_preprocessor
         self.swap_rate = swap_rate
         self.batch_size = batch_size
         self.epochs = epochs
@@ -90,7 +93,7 @@ class DAETransformer(BaseFeatureTransformer):
                 self.categorical_features, 
                 OneHotEncoder(categories='auto', sparse=False, dtype=np.float32)
             ),
-            on_field(self.numerical_features, QuantileTransformer()),
+            on_field(self.numerical_features, self.numerical_preprocessor),
         )
         X = self.preprocessor.fit_transform(dataframe)
         

@@ -1,3 +1,4 @@
+import pandas as pd
 import networkx as nx
 from node2vec import Node2Vec
 
@@ -39,7 +40,6 @@ class GraphVectorizer(BaseFeatureTransformer):
     def fit(self, dataframe):
         edges = dataframe.groupby(
             self.categorical_columns, 
-            as_index=False
         ).size().reset_index().dropna()
         
         G = nx.DiGraph()
